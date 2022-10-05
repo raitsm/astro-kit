@@ -5,15 +5,22 @@ import time
 import yaml
 
 from datetime import datetime
+from configparser import ConfigParser
+
 print('Asteroid processing service')
 
 # Initiating and reading config values. NB: currently the API URL & key are hard-coded in the source file.
 # TODO: move the values to a proper config.
 print('Loading configuration from file')
 
-# NASA API key *& URL.
-nasa_api_key = "YWsRa46NscjEyW6AIfVt5VpqlcdE0Lwa5uGgnAix"
-nasa_api_url = "https://api.nasa.gov/neo/"
+try:
+	config = ConfigParser()
+	config.read("config.ini")
+	nasa_api_key = config.get("nasa", "api_key")
+	nasa_api_url = config.get('nasa', "api_url")
+except:
+    print("Error reading configuration file")		# should be logger.exception("")
+print("Configuration successfully loaded")		# logger.info("DONE")
 
 # Getting todays date.
 dt = datetime.now()
