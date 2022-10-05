@@ -9,16 +9,15 @@ from configparser import ConfigParser
 
 print('Asteroid processing service')
 
-# Initiating and reading config values. NB: currently the API URL & key are hard-coded in the source file.
-# TODO: move the values to a proper config.
 print('Loading configuration from file')
 
+# open the config file and read the configuration values
 try:
 	config = ConfigParser()
 	config.read("config.ini")
 	nasa_api_key = config.get("nasa", "api_key")
 	nasa_api_url = config.get('nasa', "api_url")
-except:
+except:		# error condition
     print("Error reading configuration file")		# should be logger.exception("")
 print("Configuration successfully loaded")		# logger.info("DONE")
 
