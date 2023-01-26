@@ -5,6 +5,15 @@ import mysql.connector
 from datetime import datetime
 from configparser import ConfigParser
 
+# a function to test if a list of keywords is present in a section sect of a config
+# inputs: section, keywords, config
+def test_for_keywords(sect : str, kewords : list, conf : ConfigParser):
+    print("Section: "+sect)
+    for k in kewords:
+        print("Testing for "+ sect +" option: "+ k)
+        assert conf.has_option(sect,k) == True
+        print("OK")
+        
 print("Updated Configuration file test")
 
 # Testing if configuration file exists on disk in the current working directory
@@ -42,13 +51,14 @@ print("----------")
 
 # Ascertain that a Twitter-related section and the required keywords are present in the config file
 print("Checking if config has a Twitter section -->")
-assert config.has_section("mysql_config") == True
+s = "twitter"
+assert config.has_section(s) == True
 print("OK")
-print("Checking if config has Twitter related options -->")
-assert config.has_option('twitter', 'consumer_key') == True
-assert config.has_option('twitter', 'consumer_secret') == True
-assert config.has_option('twitter', 'access_token') == True
-assert config.has_option('twitter', 'access_token_secret') == True
+twitter_keys = ["consumer_key","consumer_secret","access_token","access_token_secret"]
+print("Checking if config has all required Twitter related options -->")
+test_for_keywords(s, twitter_keys, config)
+
+print("----------")
 
 
 # Checking if possible to connect to nasa with the existing config options
