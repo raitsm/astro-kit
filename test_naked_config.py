@@ -5,7 +5,7 @@ import mysql.connector
 from datetime import datetime
 from configparser import ConfigParser
 
-print("Configuration file test")
+print("Updated Configuration file test")
 
 # Testing if configuration file exists on disk in the current working directory
 print("----------")
