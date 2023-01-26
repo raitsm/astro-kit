@@ -3,12 +3,70 @@ import json
 import datetime
 import time
 import yaml
+import mysql.connector
 
 import logging
 import logging.config
 from datetime import datetime
 from configparser import ConfigParser
+from mysql.connector import Error
 
+# establish a connection to the db
+def init_db():
+	global connection
+	connection = mysql.connector.connect(host=mysql_config_mysql_host, database=mysql_config_mysql_db, user=mysql_config_mysql_user, password=mysql_config_mysql_pass)
+
+def get_cursor():
+	global connection
+	try:
+		connection.ping(reconnect=True, attempts=1, delay=0)
+		connection.commit()
+	except mysql.connector.Error as err:
+		logger.error("No connection to db " + str(err))
+		connection = init_db()
+		connection.commit()
+	return connection.cursor()
+
+# Check if an asteroid exists in db
+def mysql_check_if_ast_exists_in_db(request_day, ast_id):
+	records = []
+	cursor = get_cursor()
+	try:
+		cursor = connection.cursor()
+		result  = cursor.execute("SELECT count(*) FROM ast_daily WHERE `create_date` = '" + str(request_day) + "' AND `ast_id` = '" + str(ast_id) + "'")
+		records = cursor.fetchall()
+		connection.commit()
+	except Error as e :
+		logger.error("SELECT count(*) FROM ast_daily WHERE `create_date` = '" + str(request_day) + "' AND `ast_id` = '" + str(ast_id) + "'")
+		logger.error('Problem checking if asteroid exists: ' + str(e))
+		pass
+	return records[0][0]
+
+# Asteroid value insert
+def mysql_insert_ast_into_db(create_date, hazardous, name, url, diam_min, diam_max, ts, dt_utc, dt_local, speed, distance, ast_id):
+	cursor = get_cursor()
+	try:
+		cursor = connection.cursor()
+		result  = cursor.execute( "INSERT INTO `ast_daily` (`create_date`, `hazardous`, `name`, `url`, `diam_min`, `diam_max`, `ts`, `dt_utc`, `dt_local`, `speed`, `distance`, `ast_id`) VALUES ('" + str(create_date) + "', '" + str(hazardous) + "', '" + str(name) + "', '" + str(url) + "', '" + str(diam_min) + "', '" + str(diam_max) + "', '" + str(ts) + "', '" + str(dt_utc) + "', '" + str(dt_local) + "', '" + str(speed) + "', '" + str(distance) + "', '" + str(ast_id) + "')")
+		connection.commit()
+	except Error as e :
+		logger.error( "INSERT INTO `ast_daily` (`create_date`, `hazardous`, `name`, `url`, `diam_min`, `diam_max`, `ts`, `dt_utc`, `dt_local`, `speed`, `distance`, `ast_id`) VALUES ('" + str(create_date) + "', '" + str(hazardous) + "', '" + str(name) + "', '" + str(url) + "', '" + str(diam_min) + "', '" + str(diam_max) + "', '" + str(ts) + "', '" + str(dt_utc) + "', '" + str(dt_local) + "', '" + str(speed) + "', '" + str(distance) + "', '" + str(ast_id) + "')")
+		logger.error('Problem inserting asteroid values into DB: ' + str(e))
+		pass
+
+def push_asteroids_arrays_to_db(request_day, ast_array, hazardous):
+	for asteroid in ast_array:
+		if mysql_check_if_ast_exists_in_db(request_day, asteroid[9]) == 0:
+			logger.debug("Asteroid NOT in db")
+			mysql_insert_ast_into_db(request_day, hazardous, asteroid[0], asteroid[1], asteroid[2], asteroid[3], asteroid[4], asteroid[5], asteroid[6], asteroid[7], asteroid[8], asteroid[9])
+		else:
+			logger.debug("Asteroid already IN DB")
+
+
+
+# main code starts here
+connection = None
+connected = False
 
 # Loading logging configuration
 with open('./log_worker.yaml', 'r') as stream:
@@ -27,16 +85,25 @@ logger.info('Loading configuration from file')
 try:
 	config = ConfigParser()
 	config.read("config.ini")
+# config parameters needed to retrieve data from NASA API
 	nasa_api_key = config.get("nasa", "api_key")
 	nasa_api_url = config.get('nasa', "api_url")
+# config parameters for database operations
+	mysql_config_mysql_host = config.get('mysql_config', 'mysql_host')
+	mysql_config_mysql_db = config.get('mysql_config', 'mysql_db')
+	mysql_config_mysql_user = config.get('mysql_config', 'mysql_user')
+	mysql_config_mysql_pass = config.get('mysql_config', 'mysql_pass')
+
 except:		# error condition
     logger.exception("Error reading configuration file")		# should be logger.exception("")
 logger.info("Configuration successfully loaded")		# logger.info("DONE")
 
+init_db()
+
 # Getting todays date.
 dt = datetime.now()
 # convert the components of the date to strings that are left-padded with zeros (use zfill for padding)
-request_date = str(dt.year) + "-" + str(dt.month).zfill(2) + "-" + str(dt.day).zfill(2)  
+request_date = str(dt.year) + "-" + str(dt.month).zfill(2) + "-" + str(dt.day).zfill(2)
 logger.debug("Generated today's date: " + str(request_date))
 
 
@@ -64,17 +131,19 @@ if r.status_code == 200:	# corresponds to  HTML Status OK, meaning request was s
 		ast_count = int(json_data['element_count'])
 		logger.info("Asteroid count today: " + str(ast_count))
 
-		if ast_count > 0:	# only process the dataset if there is at least one asteroid to process 
+		if ast_count > 0:	# only process the dataset if there is at least one asteroid to process
 
 # loop through the asteroid data (to be super-safe, additional check could be added for the request_date and the date in the dataset
 			for val in json_data['near_earth_objects'][request_date]:
 # check if several attributes required for the analysis are present in the asteroid record:
 				if 'name' and 'nasa_jpl_url' and 'estimated_diameter' and 'is_potentially_hazardous_asteroid' and 'close_approach_data' in val:
 					# capture the name of the asteroid
-					tmp_ast_name = val['name'] 
+					tmp_ast_name = val['name']
 					# capture the URL to the respective record in NASA's small body db
-					tmp_ast_nasa_jpl_url = val['nasa_jpl_url']	
-					# check if the estimated diameter of the asteroid is provided in diameters
+					tmp_ast_nasa_jpl_url = val['nasa_jpl_url']
+					# get asteroid id
+					tmp_ast_id = val['id']
+					# check if the estimated diameter of the asteroid is provided in kilometers
 					if 'kilometers' in val['estimated_diameter']:
 						# make sure there is min and max estimate, and round it to three decimal digits
 						if 'estimated_diameter_min' and 'estimated_diameter_max' in val['estimated_diameter']['kilometers']:
@@ -128,20 +197,32 @@ if r.status_code == 200:	# corresponds to  HTML Status OK, meaning request was s
 					logger.info("Asteroid name: " + str(tmp_ast_name) + " | INFO: " + str(tmp_ast_nasa_jpl_url) + " | Diameter: " + str(tmp_ast_diam_min) + " - " + str(tmp_ast_diam_max) + " km | Hazardous: " + str(tmp_ast_hazardous))
 					logger.info("Close approach TS: " + str(tmp_ast_close_appr_ts) + " | Date/time UTC TZ: " + str(tmp_ast_close_appr_dt_utc) + " | Local TZ: " + str(tmp_ast_close_appr_dt))
 					logger.info("Speed: " + str(tmp_ast_speed) + " km/h" + " | MISS distance: " + str(tmp_ast_miss_dist) + " km")
-					
+
 					# Add the current asteroid data to a list of hazardoes/safe asteroids array
 					if tmp_ast_hazardous == True:
-						ast_hazardous.append([tmp_ast_name, tmp_ast_nasa_jpl_url, tmp_ast_diam_min, tmp_ast_diam_max, tmp_ast_close_appr_ts, tmp_ast_close_appr_dt_utc, tmp_ast_close_appr_dt, tmp_ast_speed, tmp_ast_miss_dist])
+						ast_hazardous.append([tmp_ast_name, tmp_ast_nasa_jpl_url, tmp_ast_diam_min, tmp_ast_diam_max, tmp_ast_close_appr_ts, tmp_ast_close_appr_dt_utc, tmp_ast_close_appr_dt, tmp_ast_speed, tmp_ast_miss_dist, tmp_ast_id])
 					else:
-						ast_safe.append([tmp_ast_name, tmp_ast_nasa_jpl_url, tmp_ast_diam_min, tmp_ast_diam_max, tmp_ast_close_appr_ts, tmp_ast_close_appr_dt_utc, tmp_ast_close_appr_dt, tmp_ast_speed, tmp_ast_miss_dist])
+						ast_safe.append([tmp_ast_name, tmp_ast_nasa_jpl_url, tmp_ast_diam_min, tmp_ast_diam_max, tmp_ast_close_appr_ts, tmp_ast_close_appr_dt_utc, tmp_ast_close_appr_dt, tmp_ast_speed, tmp_ast_miss_dist, tmp_ast_id])
 
 		else:
 			logger.info("No asteroids are going to hit earth today")
+# Asteroid:
+# 0 - name
+# 1 - NASA JPL URL
+# 2 - min diameter
+# 3 - max diameter
+# 4 - close approach TS
+# 5 - close approach date/time UTC
+# 6 - close approach date/time local
+# 7 - speed
+# 8 - passing distance
+# 9 - id
+
 
 	logger.info("Hazardous asteorids: " + str(len(ast_hazardous)) + " | Safe asteroids: " + str(len(ast_safe)))
 
 	if len(ast_hazardous) > 0:	# are there any potentially hazardous asteroids?
-		# sort hazardoes asteroids by their approach time in ascending order
+		# sort hazardous asteroids by their approach time in ascending order
 		ast_hazardous.sort(key = lambda x: x[4], reverse=False)
 
 		logger.info("Today's possible apocalypse (asteroid impact on earth) times:")
@@ -149,12 +230,16 @@ if r.status_code == 200:	# corresponds to  HTML Status OK, meaning request was s
 			# print formatted approacch date, asteroid name & link to asteroid record in NASA db
 			logger.info(str(asteroid[6]) + " " + str(asteroid[0]) + " " + " | more info: " + str(asteroid[1]))
 
-		# now rearrange the list of hazardous asteroids by the passing distance
+		# Rearrange the list of hazardous asteroids by the passing distance
 		ast_hazardous.sort(key = lambda x: x[8], reverse=False)
-		# print the name, distanca & NASA db link for the asteroid that will pass the closest to the Earth
+		# print name, distance & NASA db link for the asteroid that will pass the closest to the Earth
 		logger.info("Closest passing distance is for: " + str(ast_hazardous[0][0]) + " at: " + str(int(ast_hazardous[0][8])) + " km | more info: " + str(ast_hazardous[0][1]))
 	else:
 		logger.info("No asteroids close passing earth today")
+	# write asteroid data to database
+	push_asteroids_arrays_to_db(request_date, ast_hazardous, 1)
+	push_asteroids_arrays_to_db(request_date, ast_safe, 0)
+
 
 else:
 	# print an error message if failed to get response from NASA
